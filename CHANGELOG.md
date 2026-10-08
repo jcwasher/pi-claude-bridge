@@ -1,5 +1,9 @@
 # Changelog
 
+## UNRELEASED
+
+- **Fix: expose a session cleanup barrier for durable hosts** — Track SDK consumers by pi session and export `waitForSession(sessionId)` so interrupt can await iterator and routing cleanup before submitting new input. Other sessions remain independent.
+
 ## 0.9.3 — 2026-10-13
 
 - **Remove: compaction and branch-summary takeovers (#189)** — pi runs them natively; the bridge routes summary calls to its isolated path. Other compaction extensions should now work. Resolves #115. Thanks @sonSunnoi.

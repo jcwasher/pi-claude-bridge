@@ -961,6 +961,17 @@ function mapToolArgs(
 let piUI: ExtensionUIContext | null = null;
 let piMode: ExtensionContext["mode"] | null = null;
 const activeQueryContexts = new Set<QueryContext>();
+const sessionConsumers = new Map<string, Set<Promise<void>>>();
+
+/**
+ * Await the SDK consumers currently running for a pi session, including their
+ * final stream/session/routing cleanup. An aborted pi stream can end before its
+ * SDK iterator does; hosts must abort, await this barrier, then submit new input.
+ * This does not abort queries or wait for queries started after the call.
+ */
+export async function waitForSession(sessionId: string): Promise<void> {
+	await Promise.all([...(sessionConsumers.get(sessionId) ?? [])]);
+}
 
 // Defaults that silently cost the user something (no Opus 1M on Max) are
 // announced once. Deferred to the first bridge query rather
@@ -2093,7 +2104,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	}
 
 	// Background consumer — runs until query ends
-	consumeQuery(sdkQuery, customToolNameToPi, model, () => wasAborted, queryCtx)
+	const consuming = consumeQuery(sdkQuery, customToolNameToPi, model, () => wasAborted, queryCtx)
 		.then(async ({ capturedSessionId }) => {
 			debug(`provider: consumeQuery completed, stopReason=${queryCtx.turnOutput?.stopReason}, error=${queryCtx.turnOutput?.errorMessage}, aborted=${wasAborted}`);
 
@@ -2205,8 +2216,23 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 				queryCtx.activeQuery = null;
 				activeQueryContexts.delete(queryCtx);
 			}
-			sdkQuery.close();
+			try { sdkQuery.close(); } catch (error) { debug("provider: query close failed", error); }
 		});
+	if (piSessionId) {
+		let consumers = sessionConsumers.get(piSessionId);
+		if (!consumers) {
+			consumers = new Set();
+			sessionConsumers.set(piSessionId, consumers);
+		}
+		// Track through final cleanup, not just consumeQuery or pi stream end.
+		// The error path already reports to pi; the barrier only waits for cleanup.
+		const settled = consuming.then(() => {}, () => {});
+		consumers.add(settled);
+		void settled.then(() => {
+			consumers.delete(settled);
+			if (consumers.size === 0) sessionConsumers.delete(piSessionId);
+		});
+	}
 
 	return stream;
 }
