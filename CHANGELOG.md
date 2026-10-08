@@ -1,5 +1,9 @@
 # Changelog
 
+## UNRELEASED
+
+- **Fix: expose a session cleanup barrier for durable hosts** — Track SDK consumers by pi session and export `waitForSession(sessionId)` so interrupt can await iterator and routing cleanup before submitting new input. Other sessions remain independent.
+
 ## 0.9.1 — 2026-09-30
 
 - **Bump: Claude Sonnet 5.5 and pi-ai 0.99.1** — pi-ai update brings `claude-sonnet-5-5` with 1M context. Agent SDK now requires `^0.3.284`.
