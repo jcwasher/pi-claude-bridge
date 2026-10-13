@@ -28,6 +28,9 @@ import { buildActionSummary, type ToolCallState } from "./askclaude-ui.js";
 import { askClaudeCallTags, askClaudeToolDescription, buildAskClaudeParams, resolveAskClaudeDefaults, resolveAskClaudeMode, type AskClaudeMode } from "./askclaude-schema.js";
 import { nonSystemMessages, toBridgeContext } from "./transcript.js";
 import { forgetSessionCwd, rememberSessionCwd, rememberSummarySession, sessionCwdFor, summarySessionFor } from "./session-cwd.js";
+import { emitRateLimit, reportAccountInfo } from "./rate-limit-listeners.js";
+
+export { onRateLimit, type RateLimitListener, type RateLimitObservation } from "./rate-limit-listeners.js";
 import { updateUsage, type SdkUsage } from "./usage.js";
 import { rateLimitResponse } from "./rate-limit.js";
 
@@ -1528,6 +1531,7 @@ async function consumeQuery(
 				// unrelated failure on this query doesn't inherit the label.
 				if (queryCtx.rateLimitRejection) {
 					resultError = describeRateLimitFailure(queryCtx.rateLimitRejection, resultError);
+					emitRateLimit({ kind: "rate_limit_failure", info: queryCtx.rateLimitRejection, error: resultError, sessionId: queryCtx.piSessionId, at: Date.now() }, debug);
 					queryCtx.rateLimitRejection = null;
 				}
 				debug(`consumeQuery: error result, subtype=${message.subtype}, error=${resultError}`);
@@ -1541,6 +1545,7 @@ async function consumeQuery(
 			const info = (message as any).rate_limit_info;
 			debug("consumeQuery: rate_limit_event", JSON.stringify(info).slice(0, 300));
 			if (info) queryCtx.heldRateLimit = info;
+			if (info) emitRateLimit({ kind: "rate_limit", info, sessionId: queryCtx.piSessionId, claudeSessionId: (message as any).session_id ?? null, at: Date.now() }, debug);
 			await reportHeldRateLimit(queryCtx, model);
 			if (info?.status === "rejected") {
 				// Held so the failure Claude Code sends next can be named as a rate limit.
@@ -2083,6 +2088,7 @@ function streamClaudeAgentSdk(model: Model<any>, context: Context, options?: Sim
 	const sdkQuery = queryImpl({ prompt: promptStream.stream, options: queryOptions });
 	queryCtx.activeQuery = sdkQuery;
 	activeQueryContexts.add(queryCtx);
+	reportAccountInfo(sdkQuery, options?.sessionId ?? null, debug);
 
 	// 4. Capture context for abort handling
 	const abortCtx = queryCtx;

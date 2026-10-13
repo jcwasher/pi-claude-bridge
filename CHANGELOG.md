@@ -2,6 +2,7 @@
 
 ## UNRELEASED
 
+- **Add: `onRateLimit(listener)` for hosts** — every `rate_limit_event` verbatim (including `unifiedWindows`), the named rate-limit failure, and `accountInfo()` once per Claude Code subprocess, so a host can track plan usage by account without making calls of its own. Listener errors never reach the turn.
 - **Fix: expose a session cleanup barrier for durable hosts** — Track SDK consumers by pi session and export `waitForSession(sessionId)` so interrupt can await iterator and routing cleanup before submitting new input. Other sessions remain independent.
 
 ## 0.9.3 — 2026-10-13
