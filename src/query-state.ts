@@ -70,6 +70,9 @@ export class QueryContext {
 	turnStreamOpen = false;
 	/** turnBlocks length at that message_start: where an abandoned attempt's blocks begin. */
 	turnStreamBlockStart = 0;
+	/** Text blocks of `<synthetic>` reports this turn, never streamed. They stay the
+	 *  failed turn's content, or leave it once Claude Code carries on (retractReports). */
+	turnReports: Array<{ type: "text"; text: string }> = [];
 
 	get turnBlocks(): Array<any> {
 		if (!this.turnOutput) throw new Error("turnBlocks accessed before resetTurnState");
@@ -101,6 +104,7 @@ export class QueryContext {
 		this.turnStreamMessageId = undefined;
 		this.turnStreamOpen = false;
 		this.turnStreamBlockStart = 0;
+		this.turnReports = [];
 		// turnToolCallIds is NOT reset — it persists across tool-result delivery
 		// callbacks within the same assistant message so results can be routed to
 		// this query while its handlers are still pending.

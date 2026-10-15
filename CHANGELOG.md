@@ -2,6 +2,7 @@
 
 ## UNRELEASED
 
+- **Fix: a `<synthetic>` report Claude Code carries on past no longer heads the reply** — when the API rejects an image ("API Error: an image in the conversation could not be processed and was removed. …"), Claude Code drops it and answers anyway; the report stayed as the turn's first text block. It now leaves the content once the answer arrives, and goes to a notice and to the new `onReport(listener)` hook for hosts. A turn that fails keeps it, as before (#162).
 - **Add: `onRateLimit(listener)` for hosts** — every `rate_limit_event` verbatim (including `unifiedWindows`), the named rate-limit failure, and `accountInfo()` once per Claude Code subprocess, so a host can track plan usage by account without making calls of its own. Listener errors never reach the turn.
 - **Fix: expose a session cleanup barrier for durable hosts** — Track SDK consumers by pi session and export `waitForSession(sessionId)` so interrupt can await iterator and routing cleanup before submitting new input. Other sessions remain independent.
 

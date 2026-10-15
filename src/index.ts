@@ -29,8 +29,10 @@ import { askClaudeCallTags, askClaudeToolDescription, buildAskClaudeParams, reso
 import { nonSystemMessages, toBridgeContext } from "./transcript.js";
 import { forgetSessionCwd, rememberSessionCwd, rememberSummarySession, sessionCwdFor, summarySessionFor } from "./session-cwd.js";
 import { emitRateLimit, reportAccountInfo } from "./rate-limit-listeners.js";
+import { emitReport } from "./report-listeners.js";
 
 export { onRateLimit, type RateLimitListener, type RateLimitObservation } from "./rate-limit-listeners.js";
+export { onReport, type ClaudeCodeReport, type ReportListener } from "./report-listeners.js";
 import { updateUsage, type SdkUsage } from "./usage.js";
 import { rateLimitResponse } from "./rate-limit.js";
 
@@ -1231,6 +1233,7 @@ function processStreamEvent(
 	const event = (message as SDKMessage & { event: any }).event;
 
 	if (event?.type === "message_start") {
+		retractReports(c, `message_start ${event.message?.id}`);
 		// Still open from an earlier message_start: Claude Code gave up on that
 		// stream and is retrying it. Its blocks were never completed.
 		if (c.turnStreamOpen) dropAbandonedStreamBlocks(c, `restreamed as ${event.message?.id}`);
@@ -1389,6 +1392,24 @@ function dropAbandonedStreamBlocks(c: QueryContext, why: string): void {
 	c.turnStreamOpen = false;
 }
 
+/** Claude Code carried on past this turn's `<synthetic>` reports: it dropped an image the API
+ *  rejected ("API Error: an image in the conversation could not be processed and was
+ *  removed. …") and asked again, and the answer is arriving. A report is not the reply, so it
+ *  leaves the turn's content (it was never streamed, and every block after it is pushed only
+ *  after this runs, so no streamed contentIndex moves) and goes to report listeners and the UI. */
+function retractReports(c: QueryContext, why: string): void {
+	if (!c.turnReports.length || !c.turnOutput) return;
+	const reports = c.turnReports;
+	c.turnReports = [];
+	for (const report of reports) {
+		const index = c.turnBlocks.indexOf(report);
+		if (index !== -1) c.turnBlocks.splice(index, 1);
+		emitReport({ text: report.text, sessionId: c.piSessionId, at: Date.now() }, debug);
+		piUI?.notify(`Claude Code: ${report.text}`, "warning");
+	}
+	debug(`retractReports: ${why}; ${reports.length} <synthetic> report(s) left the turn's content`);
+}
+
 // The SDK always yields `assistant` messages (completed content blocks) after streaming.
 // When stream_events already delivered the content, this is a no-op. But after
 // resetTurnState (e.g. tool result delivery), if the next turn's assistant message
@@ -1420,8 +1441,11 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 		if (c.turnSawStreamEvent && c.turnStreamOpen) dropAbandonedStreamBlocks(c, "synthetic failure report");
 		debug(`processAssistantMessage: <synthetic> message, keeping ${assistantMsg.content.length} block(s) off the stream`);
 		for (const block of assistantMsg.content) {
-			if (block.type === "text" && block.text) c.turnBlocks.push({ type: "text", text: block.text });
-			else debug("processAssistantMessage: unhandled <synthetic> block type", block.type);
+			if (block.type === "text" && block.text) {
+				const report = { type: "text" as const, text: block.text };
+				c.turnBlocks.push(report);
+				c.turnReports.push(report);
+			} else debug("processAssistantMessage: unhandled <synthetic> block type", block.type);
 		}
 		if (assistantMsg.usage && c.turnOutput) recordUsage(c.turnOutput, assistantMsg.usage, model);
 		return;
@@ -1434,6 +1458,7 @@ function processAssistantMessage(message: SDKMessage, model: Model<any>, customT
 		if (!id || !c.turnStreamMessageId || id === c.turnStreamMessageId) return;
 		if (c.turnStreamOpen) dropAbandonedStreamBlocks(c, `non-streaming fallback ${id}`);
 	}
+	retractReports(c, `assistant message ${assistantMsg.id}`);
 	c.turnToolCallIds = [];
 	debug(`processAssistantMessage fallback: ${assistantMsg.content.length} blocks, types=${assistantMsg.content.map((b: any) => b.type).join(",")}`);
 	for (const block of assistantMsg.content) {
@@ -1589,6 +1614,7 @@ async function consumeQuery(
 					// The failure itself was recorded above the guard, along with the served
 					// context window. What is left here is the success path: push the result
 					// text when no assistant message already delivered it.
+					if (resultError === undefined) retractReports(queryCtx, "successful result");
 					if (resultError === undefined && !queryCtx.turnSawStreamEvent && message.subtype === "success") {
 					ensureTurnStarted(queryCtx);
 					const text = message.result || "";
